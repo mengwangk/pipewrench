@@ -39,5 +39,7 @@ docker-compose exec mysql /data/load-data.sh
 docker-compose exec kimpala /run-all-services.sh
 
 $SCRIPT_DIR/sqoop-parquet-hdfs-impala/run.sh
+$SCRIPT_DIR/sqoop-parquet-full-load/run.sh
+$SCRIPT_DIR/sqoop-parquet-hdfs-hive-merge/run.sh
+$SCRIPT_DIR/kudu-table-ddl/run.sh
 $SCRIPT_DIR/sqoop-parquet-hdfs-kudu-impala/run.sh
-

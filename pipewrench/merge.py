@@ -22,6 +22,7 @@ import argparse
 import codecs
 import logging
 import os
+import re
 from json import dumps
 from jinja2 import Template
 import yaml
@@ -200,7 +201,8 @@ def render(template, **kwargs):
     :return: The reified template
     """
     template = Template(template)
-    template_functions = [map_datatypes, dumps, map_clobs]
+    template_functions = [map_datatypes, map_datatypes_v2, dumps,
+                          map_clobs, order_columns, cleanse_column]
 
     for function in template_functions:
         template.globals[function.__name__] = function
@@ -260,10 +262,36 @@ def write(string, fpath):
 if __name__ == '__main__':
     main()
 
-
 # Template functions.
 # These functions are intended to be called from Jinja2 templates.
 def map_datatypes(column):
+    """
+    Given a column, extract its datatype and return possible mappings
+     for it from a type-mappings.yml file.
+     For example, a mapping with the datatype 'bigint' may look like:
+    bigint:
+     kudu: bigint
+     impala: bigint
+     parquet: bigint
+     avro: long
+     when given a column with 'bigint' this function will return:
+     kudu: bigint
+     impala: bigint
+     parquet: bigint
+     avro: long
+    This function is intended to be called directly from templates
+    :param conf: The configuration. Not used but kept for consistency with other functions.
+    :param column: The column containing the datatype to map
+    :return: The mapped datatype
+    """
+    datatype = column['datatype'].lower()
+    logging.debug('found datatype %s', datatype)
+    mapped_datatype = type_mappings['type_mapping'].get(datatype)
+    logging.debug('mapped %s to %s', datatype, mapped_datatype)
+    return mapped_datatype
+
+
+def map_datatypes_v2(column, storage_format):
     """
     Given a column, extract its datatype and return possible mappings
      for it from a type-mappings.yml file.
@@ -283,15 +311,22 @@ def map_datatypes(column):
      avro: long
 
     This function is intended to be called directly from templates
-    :param conf: The configuration. Not used but kept for consistency with other functions.
     :param column: The column containing the datatype to map
+    :param storage_format: Table storage format (avro, impala, parquet, kudu, etc)
     :return: The mapped datatype
     """
     datatype = column['datatype'].lower()
     logging.debug('found datatype %s', datatype)
-    mapped_datatype = type_mappings['type_mapping'].get(datatype)
+    mapped_datatype_dic = type_mappings['type_mapping'].get(datatype)
+    mapped_datatype = mapped_datatype_dic.get(storage_format)
+    if mapped_datatype:
+        if mapped_datatype.lower() == 'decimal':
+            mapped_datatype = 'DECIMAL({precision}, {scale})'.format(
+                precision=column['precision'], scale=column['scale'])
+    else:
+        mapped_datatype = 'STRING'
     logging.debug('mapped %s to %s', datatype, mapped_datatype)
-    return mapped_datatype
+    return mapped_datatype.upper()
 
 
 def map_clobs(columns):
@@ -304,12 +339,39 @@ def map_clobs(columns):
     hasclobs = False
     clobs = ""
     for c in columns:
-        if c.get("datatype") == "clob":
+        if c.get("datatype").lower() == "clob":
             if not hasclobs:
                 hasclobs = True
                 clobs = "--map-column-java "
             clobs = clobs + c.get("name") + "=String,"
     return clobs[:-1]
+
+
+def cleanse_column(column):
+    """
+    Template function for cleansing column names.
+    Columns beginning with / or _ will have these removed.
+    Columns containing spaces, /, (, ), - will be replaced with underscores.
+    Multiple _ in a row will be replaced with a single _
+    :param column: String column name from source system
+    :return: Cleansed column name
+    """
+    column = column.lower()
+    if column.startswith("/"):
+        column = column.replace("/", "", 1)
+
+    if column.startswith('_'):
+        column = column.replace('_', "", 1)
+
+    # Replace all /,-,(,), blank spaces with _
+    p = re.compile(r'(/|-|\(|\)|\s)')
+    column = p.sub('_', column)
+
+    # After replacing values find any multiple _ and replace them with a single underscore
+    p = re.compile(r'(_{2,})')
+    column = p.sub('_', column)
+
+    return column
 
 
 # Testing Functions
@@ -326,3 +388,24 @@ def merge_single_template(template_file_path, type_mapping, conf):
     with codecs.open(template_file_path, 'r', 'UTF-8') as template_file:
         template = template_file.read()
         return render(template, conf=conf, table=table)
+
+def order_columns(pks, columns):
+    """
+    Orders column list to include primary keys first and then non primary
+    key columns
+    :param pks: primary key list
+    :param columns: columns
+    :return: primary key columns + non primary key columns ordered
+    """
+    pk_list = []
+    non_pk_list = []
+
+    for c in columns:
+        for pk in pks:
+            if c.get("name") == pk:
+                pk_list.append(c)
+                break
+            elif pks[-1] == pk:
+                non_pk_list.append(c)
+
+    return pk_list+non_pk_list

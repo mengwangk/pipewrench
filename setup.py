@@ -16,20 +16,35 @@
 
 from setuptools import setup
 import unittest
-version = '0.1.0'
+import os
+import sys
+version = '0.1.6'
 
 def pipewrench_test_suite():
     test_loader = unittest.TestLoader()
     test_suite = test_loader.discover('pipewrench', pattern='*_test.py')
     return test_suite
 
+def gen_data_files(*dirs):
+    # If we are building an rpm, generate list of data files to include. Otherwise, return none.
+    if '--single-version-externally-managed' in sys.argv:
+        results = []
+        for src_dir in dirs:
+            for root,dirs,files in os.walk(src_dir):
+                results.append(('/usr/share/pipewrench/' + root, map(lambda f:root + "/" + f, files)))
+        return results
+    else:
+        return
+
 setup(name='pipewrench',
       version=version,
       description='Framework for building data pipelines',
       author='Cargill Inc',
       url='https://cargill.github.io/',
-      install_requires=['jinja2', 'pyyaml', 'sdctool', 'pytest', 'pylint', 'marshmallow'],
+      install_requires=['jinja2<=2.10', 'pyyaml<=3.12', 'pytest<=3.3.1', 'pylint<=1.8.1', 'marshmallow<=2.10.5'],
       packages=['pipewrench'],
       test_suite='setup.pipewrench_test_suite',
-      scripts=['pipewrench-merge']
+      scripts=['pipewrench-merge'],
+      data_files=gen_data_files('templates')
       )
+

@@ -1,4 +1,4 @@
-{#  Copyright 2017 Cargill Incorporated
+{#-  Copyright 2017 Cargill Incorporated
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -16,15 +16,18 @@
 set sync_ddl=1;
 USE {{ conf.staging_database.name }};
 CREATE EXTERNAL TABLE IF NOT EXISTS {{ table.destination.name }}_parquet (
-{% for column in table.columns %}
-{{ column.name }} {{ map_datatypes(column).parquet }} COMMENT '{{ column.comment }}'
+{%- for column in table.columns %}
+{{ column.name }} {{ map_datatypes_v2(column, 'parquet') }} COMMENT "{{ column.comment }}"
 {%- if not loop.last -%}, {% endif %}
 {%- endfor %})
+COMMENT '{{ table.comment }}'
 STORED AS Parquet
 LOCATION '{{ conf.staging_database.path }}/{{ table.destination.name }}/incr'
+{%- if table.metadata %}  
 TBLPROPERTIES(
-  'SOURCE' = '{{ table.META_SOURCE }}',
-  'SECURITY_CLASSIFICATION' = '{{ table.META_SECURITY_CLASSIFICATION }}',
-  'LOAD_FREQUENCY' = '{{ table.META_LOAD_FREQUENCY }}',
-  'CONTACT_INFO' = '{{ table.META_CONTACT_INFO }}'
+  {%- for key, value in table.metadata.items() %}
+  '{{ key }}' = '{{ value }}'{%- if not loop.last -%}, {% endif %}
+  {%- endfor %}
 )
+{%- endif %}
+
